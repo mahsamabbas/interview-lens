@@ -35,10 +35,13 @@ To use a different model, set `OLLAMA_CHAT_MODEL`.
 pyannote needs a Hugging Face token and accepted model terms:
 
 1. Create a read token at <https://huggingface.co/settings/tokens>.
-2. Accept the terms for [`pyannote/speaker-diarization-3.1`](https://huggingface.co/pyannote/speaker-diarization-3.1) and [`pyannote/segmentation-3.0`](https://huggingface.co/pyannote/segmentation-3.0).
-3. Put the token in `backend/.env` as `HF_TOKEN=...`.
+2. Accept the terms (same HF account as the token) for:
+   - [`pyannote/speaker-diarization-3.1`](https://huggingface.co/pyannote/speaker-diarization-3.1)
+   - [`pyannote/segmentation-3.0`](https://huggingface.co/pyannote/segmentation-3.0)
+   - [`pyannote/speaker-diarization-community-1`](https://huggingface.co/pyannote/speaker-diarization-community-1) (newer `pyannote.audio` pulls this too)
+3. Put the token in root `.env` for Docker (`HF_TOKEN=...`) and/or `backend/.env` for local uvicorn.
 
-Without a token, transcription still works. Every segment is labelled `unknown` and you assign speakers by hand in the transcript step.
+Without a token (or if diarization fails), transcription still works. Every segment is labelled `unknown` — click the speaker chip to set **Interviewer** / **Candidate**, then Analyze.
 
 ## 3. Run locally (recommended, full STT)
 

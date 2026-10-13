@@ -109,7 +109,14 @@ def transcribe_media(
             on_phase("diarizing")
         try:
             labels = _align(segments, _run_diarize(path, hf_token))
-        except Exception:
+        except Exception as exc:
+            # Best-effort: keep transcript text; UI can relabel speakers.
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "Diarization failed (%s); labeling speakers as unknown",
+                exc,
+            )
             labels = [None] * len(segments)
     speakers = map_speakers(labels)
     return [
