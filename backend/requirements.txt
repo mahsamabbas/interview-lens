@@ -1,0 +1,11 @@
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+python-multipart>=0.0.9
+python-dotenv>=1.0.0
+pydantic>=2.0.0
+httpx>=0.27.0
+pytest>=8.0.0
+faster-whisper>=1.0.0
+# pyannote is heavy — pin in README; tests mock STT so CI can omit GPU deps if needed
+torch>=2.0.0
+pyannote.audio>=3.1.0
