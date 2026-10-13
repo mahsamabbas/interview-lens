@@ -5,6 +5,7 @@ functions so importing this module (and running pytest with STT mocked)
 never requires them.
 """
 
+from collections.abc import Callable
 from pathlib import Path
 
 from app import config
@@ -32,7 +33,7 @@ def map_speakers(raw_labels: list[str | None]) -> list[Speaker]:
     return out
 
 
-def _whisper_segments(path: Path) -> list[dict]:
+def _run_whisper(path: Path) -> list[dict]:
     try:
         from faster_whisper import WhisperModel
     except ImportError as e:  # pragma: no cover - depends on env
@@ -55,7 +56,7 @@ def _whisper_segments(path: Path) -> list[dict]:
     return out
 
 
-def _diarize(path: Path, hf_token: str) -> list[tuple[float, float, str]]:
+def _run_diarize(path: Path, hf_token: str) -> list[tuple[float, float, str]]:
     """Return (start_s, end_s, label) turns. Raises on any failure."""
     from pyannote.audio import Pipeline
 
@@ -86,18 +87,28 @@ def _align(segments: list[dict], turns: list[tuple[float, float, str]]) -> list[
     return labels
 
 
-def transcribe_media(path: Path, hf_token: str = "") -> list[dict]:
+def transcribe_media(
+    path: Path,
+    hf_token: str = "",
+    on_phase: Callable[[str], None] | None = None,
+) -> list[dict]:
     """Transcribe media into segments: idx/start_ms/end_ms/speaker/text.
 
     Whisper failure raises. Diarization is best-effort: without an HF token or
     if pyannote fails, every segment gets speaker "unknown".
+    `on_phase` (optional) is called with "transcribing" then "diarizing" (only
+    when diarization will actually run).
     """
     path = Path(path)
-    segments = _whisper_segments(path)
+    if on_phase:
+        on_phase("transcribing")
+    segments = _run_whisper(path)
     labels: list[str | None] = [None] * len(segments)
     if hf_token and segments:
+        if on_phase:
+            on_phase("diarizing")
         try:
-            labels = _align(segments, _diarize(path, hf_token))
+            labels = _align(segments, _run_diarize(path, hf_token))
         except Exception:
             labels = [None] * len(segments)
     speakers = map_speakers(labels)

@@ -137,3 +137,23 @@ def test_map_speakers(labels, expected):
 def test_stt_module_has_no_heavy_toplevel_imports():
     assert not hasattr(stt_service, "torch")
     assert not hasattr(stt_service, "WhisperModel")
+
+
+def test_job_goes_through_diarizing_status(client, monkeypatch, tmp_path):
+    statuses = []
+    real_update = db.update_job
+
+    def spy_update(job_id, status, *a, **k):
+        statuses.append(status)
+        return real_update(job_id, status, *a, **k)
+
+    monkeypatch.setattr(db, "update_job", spy_update)
+    monkeypatch.setattr(stt_service, "_run_whisper", lambda p: [
+        {"start_ms": 0, "end_ms": 1000, "text": "Hello"}])
+    monkeypatch.setattr(stt_service, "_run_diarize", lambda p, t: [(0.0, 1.0, "A")])
+    monkeypatch.setattr("app.config.HF_TOKEN", "tok")
+    sid = _session_with_media(client, tmp_path)
+    job_id = db.create_job(sid, "transcribe")
+    run_transcribe_job(job_id)
+    assert statuses == ["transcribing", "transcribing", "diarizing", "done"]
+    assert client.get(f"/sessions/{sid}").json()["segments"][0]["speaker"] == "interviewer"

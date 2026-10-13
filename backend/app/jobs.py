@@ -1,3 +1,4 @@
+import inspect
 from pathlib import Path
 
 from app import config, db, stt_service
@@ -14,6 +15,16 @@ def complete_job_without_stt(session_id: str) -> str:
     return db.create_job(session_id, "transcribe", "done")
 
 
+def _accepts_on_phase(fn) -> bool:
+    try:
+        params = inspect.signature(fn).parameters
+    except (TypeError, ValueError):
+        return False
+    return "on_phase" in params or any(
+        p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()
+    )
+
+
 def run_transcribe_job(job_id: str) -> None:
     job = db.get_job(job_id)
     if job is None:
@@ -26,7 +37,11 @@ def run_transcribe_job(job_id: str) -> None:
 
         db.update_job(job_id, "transcribing")
         # Looked up via module attribute so tests can monkeypatch it.
-        raw = stt_service.transcribe_media(Path(media_path), config.HF_TOKEN)
+        fn = stt_service.transcribe_media
+        kwargs = {}
+        if _accepts_on_phase(fn):
+            kwargs["on_phase"] = lambda status: db.update_job(job_id, status)
+        raw = fn(Path(media_path), config.HF_TOKEN, **kwargs)
         segments = [
             SegmentIn(**{**seg, "idx": i}).model_dump() for i, seg in enumerate(raw)
         ]
