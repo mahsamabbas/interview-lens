@@ -5,13 +5,20 @@ functions so importing this module (and running pytest with STT mocked)
 never requires them.
 """
 
+from __future__ import annotations
+
+import logging
 from collections.abc import Callable
 from pathlib import Path
 
 from app import config
 from app.models import Speaker
 
-_DIARIZATION_MODEL = "pyannote/speaker-diarization-3.1"
+logger = logging.getLogger(__name__)
+
+_whisper_model = None
+_diarize_pipeline = None
+_diarize_pipeline_token: str | None = None
 
 
 def map_speakers(raw_labels: list[str | None]) -> list[Speaker]:
@@ -33,14 +40,21 @@ def map_speakers(raw_labels: list[str | None]) -> list[Speaker]:
     return out
 
 
+def _get_whisper():
+    global _whisper_model
+    if _whisper_model is None:
+        try:
+            from faster_whisper import WhisperModel
+        except ImportError as e:  # pragma: no cover - depends on env
+            raise RuntimeError(
+                "faster-whisper is not installed; install it to transcribe media"
+            ) from e
+        _whisper_model = WhisperModel(config.WHISPER_MODEL, compute_type="int8")
+    return _whisper_model
+
+
 def _run_whisper(path: Path) -> list[dict]:
-    try:
-        from faster_whisper import WhisperModel
-    except ImportError as e:  # pragma: no cover - depends on env
-        raise RuntimeError(
-            "faster-whisper is not installed; install it to transcribe media"
-        ) from e
-    model = WhisperModel(config.WHISPER_MODEL, compute_type="int8")
+    model = _get_whisper()
     segments, _info = model.transcribe(str(path))
     out = []
     for seg in segments:
@@ -56,21 +70,58 @@ def _run_whisper(path: Path) -> list[dict]:
     return out
 
 
+def _extract_diarization_turns(diarization) -> list[tuple[float, float, str]]:
+    """Normalize pyannote 3.x Annotation and 4.x DiarizeOutput to turns."""
+    # community-1 / pyannote.audio 4.x
+    exclusive = getattr(diarization, "exclusive_speaker_diarization", None)
+    speaker_diarization = exclusive or getattr(diarization, "speaker_diarization", None)
+    if speaker_diarization is not None:
+        turns: list[tuple[float, float, str]] = []
+        for turn, speaker in speaker_diarization:
+            label = str(speaker)
+            turns.append((float(turn.start), float(turn.end), label))
+        if turns:
+            return turns
+
+    # legacy Annotation API (speaker-diarization-3.1)
+    if hasattr(diarization, "itertracks"):
+        return [
+            (float(turn.start), float(turn.end), str(label))
+            for turn, _, label in diarization.itertracks(yield_label=True)
+        ]
+
+    raise RuntimeError(f"Unsupported diarization output type: {type(diarization)!r}")
+
+
+def _get_diarize_pipeline(hf_token: str):
+    global _diarize_pipeline, _diarize_pipeline_token
+    if _diarize_pipeline is None or _diarize_pipeline_token != hf_token:
+        from pyannote.audio import Pipeline
+
+        model_id = config.DIARIZATION_MODEL
+        try:
+            pipeline = Pipeline.from_pretrained(model_id, token=hf_token)
+        except TypeError:  # older pyannote
+            pipeline = Pipeline.from_pretrained(model_id, use_auth_token=hf_token)
+        if pipeline is None:
+            raise RuntimeError("pyannote pipeline unavailable (check HF_TOKEN/model access)")
+        _diarize_pipeline = pipeline
+        _diarize_pipeline_token = hf_token
+    return _diarize_pipeline
+
+
 def _run_diarize(path: Path, hf_token: str) -> list[tuple[float, float, str]]:
     """Return (start_s, end_s, label) turns. Raises on any failure."""
-    from pyannote.audio import Pipeline
-
+    pipeline = _get_diarize_pipeline(hf_token)
+    # Interviews are almost always two speakers — helps clustering.
     try:
-        pipeline = Pipeline.from_pretrained(_DIARIZATION_MODEL, token=hf_token)
-    except TypeError:  # older pyannote
-        pipeline = Pipeline.from_pretrained(_DIARIZATION_MODEL, use_auth_token=hf_token)
-    if pipeline is None:
-        raise RuntimeError("pyannote pipeline unavailable (check HF_TOKEN/model access)")
-    diarization = pipeline(str(path))
-    return [
-        (turn.start, turn.end, label)
-        for turn, _, label in diarization.itertracks(yield_label=True)
-    ]
+        diarization = pipeline(str(path), num_speakers=2)
+    except TypeError:
+        diarization = pipeline(str(path))
+    turns = _extract_diarization_turns(diarization)
+    if not turns:
+        raise RuntimeError("diarization returned no speaker turns")
+    return turns
 
 
 def _align(segments: list[dict], turns: list[tuple[float, float, str]]) -> list[str | None]:
@@ -111,11 +162,10 @@ def transcribe_media(
             labels = _align(segments, _run_diarize(path, hf_token))
         except Exception as exc:
             # Best-effort: keep transcript text; UI can relabel speakers.
-            import logging
-
-            logging.getLogger(__name__).warning(
+            logger.warning(
                 "Diarization failed (%s); labeling speakers as unknown",
                 exc,
+                exc_info=True,
             )
             labels = [None] * len(segments)
     speakers = map_speakers(labels)

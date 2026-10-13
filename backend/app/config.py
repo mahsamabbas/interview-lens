@@ -15,6 +15,11 @@ OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
 OLLAMA_CHAT_MODEL = os.getenv("OLLAMA_CHAT_MODEL", "qwen2.5:7b")
 HF_TOKEN = os.getenv("HF_TOKEN", "")
 WHISPER_MODEL = os.getenv("WHISPER_MODEL", "base")
+# Newer pyannote.audio prefers community-1; 3.1 still works if gated access is set.
+DIARIZATION_MODEL = os.getenv(
+    "DIARIZATION_MODEL",
+    "pyannote/speaker-diarization-community-1",
+)
 MIN_JD_CHARS = 40
 MAX_JD_CHARS = 20_000
 ALLOWED_MEDIA = {".wav", ".mp3", ".m4a", ".webm", ".mp4", ".mov"}

@@ -65,3 +65,22 @@ def test_whisper_failure_raises(monkeypatch):
 
     with pytest.raises(RuntimeError, match="no whisper"):
         stt_service.transcribe_media(Path("x.wav"))
+
+
+class _Turn:
+    def __init__(self, start, end):
+        self.start = start
+        self.end = end
+
+
+class _CommunityOut:
+    def __init__(self):
+        self.speaker_diarization = [
+            (_Turn(0.0, 1.0), "SPEAKER_00"),
+            (_Turn(1.0, 2.0), "SPEAKER_01"),
+        ]
+
+
+def test_extract_community_diarization_turns():
+    turns = stt_service._extract_diarization_turns(_CommunityOut())
+    assert turns == [(0.0, 1.0, "SPEAKER_00"), (1.0, 2.0, "SPEAKER_01")]

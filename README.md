@@ -43,6 +43,8 @@ pyannote needs a Hugging Face token and accepted model terms:
 
 Without a token (or if diarization fails), transcription still works. Every segment is labelled `unknown` — click the speaker chip to set **Interviewer** / **Candidate**, then Analyze.
 
+**Speed tip:** Docker STT runs on CPU. A ~20 minute `.mov` can take a long time. For demos use a **2–5 minute** clip, or set `WHISPER_MODEL=tiny` in root `.env` (faster, slightly less accurate than `base`).
+
 ## 3. Run locally (recommended, full STT)
 
 The local virtualenv is the primary way to run InterviewLens with speech-to-text, because the Whisper, torch and pyannote stack is heavy.
