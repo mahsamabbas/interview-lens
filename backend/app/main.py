@@ -1,3 +1,4 @@
+import importlib.util
 import shutil
 from contextlib import asynccontextmanager
 
@@ -7,6 +8,7 @@ from fastapi import BackgroundTasks, FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
 from app import config, db, jobs
+from app.ollama_client import ollama_ok
 from app.models import (
     CreateSessionIn,
     CreateSessionOut,
@@ -14,6 +16,7 @@ from app.models import (
     JobCreatedOut,
     JobOut,
     PasteIn,
+    ReportsOut,
     SessionOut,
     SessionSummaryOut,
     TranscriptPatchIn,
@@ -47,10 +50,23 @@ def _require_session(session_id: str) -> dict:
     return session
 
 
+def _whisper_ready() -> bool:
+    # Import check only; never load the model from the health endpoint.
+    try:
+        return importlib.util.find_spec("faster_whisper") is not None
+    except (ImportError, ValueError):
+        return False
+
+
 @app.get("/health")
 def health():
-    # Ollama probe is a stub until the analyze task lands.
-    return {"status": "ok", "ollama": False}
+    return {
+        "ok": True,
+        "status": "ok",
+        "ollama": ollama_ok(),
+        "whisper_ready": _whisper_ready(),
+        "hf_token_set": bool(config.HF_TOKEN),
+    }
 
 
 @app.get("/sessions", response_model=list[SessionSummaryOut])
@@ -160,3 +176,24 @@ def patch_transcript(session_id: str, body: TranscriptPatchIn):
     _require_session(session_id)
     db.replace_segments(session_id, [s.model_dump() for s in body.segments])
     return {"ok": True, "segments": len(body.segments)}
+
+
+@app.post("/sessions/{session_id}/analyze", response_model=JobCreatedOut)
+def analyze(session_id: str, background: BackgroundTasks):
+    session = _require_session(session_id)
+    if not (session.get("jd_text") or "").strip():
+        raise HTTPException(status_code=400, detail="Job description is required")
+    if not db.list_segments(session_id):
+        raise HTTPException(status_code=400, detail="Transcript is required")
+    job_id = jobs.start_analyze_job(session_id)
+    background.add_task(jobs.run_analyze_job, job_id)
+    return {"job_id": job_id}
+
+
+@app.get("/sessions/{session_id}/reports", response_model=ReportsOut)
+def get_reports(session_id: str):
+    _require_session(session_id)
+    report = db.latest_report(session_id)
+    if report is None:
+        raise HTTPException(status_code=404, detail="No report yet")
+    return {"candidate": report["candidate_json"], "hiring": report["hiring_json"]}
