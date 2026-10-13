@@ -2,6 +2,7 @@ import { useState } from 'react'
 import Home from './components/Home'
 import Setup from './components/Setup'
 import Stepper from './components/Stepper'
+import TranscriptStudio from './components/TranscriptStudio'
 import { getSession } from './lib/api'
 import type { AppStep, StepKey } from './lib/setup'
 
@@ -63,12 +64,12 @@ export default function App() {
           }}
         />
       )}
-      {step === 'transcript' && (
-        <Placeholder
-          title="Transcript studio"
-          text="Review speakers and edit the transcript here. Coming in the next step."
-          onNext={() => setStep('reports')}
-          nextLabel="Continue to reports"
+      {step === 'transcript' && sessionId && (
+        <TranscriptStudio
+          key={sessionId}
+          sessionId={sessionId}
+          onBack={() => setStep('setup')}
+          onAnalyzed={() => setStep('reports')}
         />
       )}
       {step === 'reports' && (
