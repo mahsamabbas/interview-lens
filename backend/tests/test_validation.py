@@ -20,3 +20,7 @@ def test_media_rejects_exe():
 
 def test_media_accepts_wav():
     assert validate_media_filename("interview.WAV") == ".wav"
+
+
+def test_media_accepts_mov():
+    assert validate_media_filename("interview.MOV") == ".mov"

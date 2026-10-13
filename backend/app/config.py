@@ -17,7 +17,7 @@ HF_TOKEN = os.getenv("HF_TOKEN", "")
 WHISPER_MODEL = os.getenv("WHISPER_MODEL", "base")
 MIN_JD_CHARS = 40
 MAX_JD_CHARS = 20_000
-ALLOWED_MEDIA = {".wav", ".mp3", ".m4a", ".webm", ".mp4"}
+ALLOWED_MEDIA = {".wav", ".mp3", ".m4a", ".webm", ".mp4", ".mov"}
 ALLOWED_JD_EXT = {".txt", ".md"}
 HIRING_DISCLAIMER = (
     "InterviewLens is an assistive tool only. Final hiring decisions must be made by a human."

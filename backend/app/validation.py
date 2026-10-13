@@ -18,5 +18,5 @@ def validate_jd_text(text: str) -> str:
 def validate_media_filename(filename: str) -> str:
     ext = Path(filename or "").suffix.lower()
     if ext not in config.ALLOWED_MEDIA:
-        raise ValidationError("Unsupported media extension. Use wav, mp3, m4a, webm, or mp4.")
+        raise ValidationError("Unsupported media extension. Use wav, mp3, m4a, webm, mp4, or mov.")
     return ext
