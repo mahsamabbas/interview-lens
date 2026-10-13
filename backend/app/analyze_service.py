@@ -102,6 +102,9 @@ def _filter_evidence(
             )
             existing.add(x.skill.lower())
     hire.red_flags = [x for x in hire.red_flags if ok(x.evidence_quote)]
+    if hire.recommendation == "pass" and (not hire.skill_evidence or dropped):
+        hire.recommendation = "borderline"
+        hire.hire_confidence = min(hire.hire_confidence, 60)
     hire.disclaimer = config.HIRING_DISCLAIMER
     return cand, hire
 

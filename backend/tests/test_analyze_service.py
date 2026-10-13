@@ -92,10 +92,13 @@ def test_strips_invented_evidence(monkeypatch):
         {"point": "K8s", "evidence_quote": "I run k8s clusters"}
     )
     payload["hiring"]["recommendation"] = "pass"
+    payload["hiring"]["hire_confidence"] = 85
     monkeypatch.setattr(analyze_service, "chat_json", lambda prompt: payload)
     segs = [{"speaker": "candidate", "text": "I use FastAPI daily"}]
     cand, hire = analyze_interview("Need Kubernetes and Python." + (" y" * 20), segs)
     assert hire.skill_evidence == []
+    assert hire.recommendation == "borderline"
+    assert hire.hire_confidence == 60
     assert hire.red_flags == []
     assert [s.point for s in cand.strengths] == ["Python"]
     # stripped skill must surface as a gap, not silently vanish
