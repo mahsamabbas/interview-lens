@@ -22,7 +22,8 @@ export default function App() {
     try {
       const s = await getSession(id)
       setSessionId(id)
-      setStep(s.status === 'done' ? 'reports' : s.segments.length > 0 ? 'transcript' : 'setup')
+      const toReports = s.status === 'done' || s.has_report
+      setStep(toReports ? 'reports' : s.segments.length > 0 ? 'transcript' : 'setup')
     } catch (e) {
       setOpenError((e as Error).message)
     }

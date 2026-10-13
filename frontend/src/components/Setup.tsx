@@ -8,7 +8,15 @@ import {
   sourceUpload,
   type SourceType,
 } from '../lib/api'
-import { canContinue, jdValid, MIN_JD_CHARS, sourceAttached } from '../lib/setup'
+import {
+  canContinue,
+  hasExistingSource,
+  jdValid,
+  MIN_JD_CHARS,
+  sourceAttached,
+  sourceNeedsIngest,
+  type ExistingSessionSource,
+} from '../lib/setup'
 
 interface Props {
   sessionId: string | null
@@ -34,13 +42,29 @@ export default function Setup({ sessionId, onBack, onReady }: Props) {
   const [paste, setPaste] = useState('')
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [existing, setExisting] = useState<ExistingSessionSource>({
+    sourceType: null,
+    hasMedia: false,
+    hasSegments: false,
+  })
   const jdFileRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     if (!sessionId) return
     let live = true
     getSession(sessionId)
-      .then((s) => live && setJd((cur) => cur || s.jd_text || ''))
+      .then((s) => {
+        if (!live) return
+        setJd((cur) => cur || s.jd_text || '')
+        const hasMedia = Boolean(s.media_path)
+        const hasSegments = s.segments.length > 0
+        setExisting({
+          sourceType: s.source_type,
+          hasMedia,
+          hasSegments,
+        })
+        if (s.source_type) setSource(s.source_type)
+      })
       .catch(() => undefined)
     return () => {
       live = false
@@ -48,7 +72,7 @@ export default function Setup({ sessionId, onBack, onReady }: Props) {
   }, [sessionId])
 
   const draft = { jd, source, file, paste }
-  const ok = canContinue(draft)
+  const ok = canContinue(draft, existing)
 
   const loadJdFile = async (f: File | undefined) => {
     if (!f) return
@@ -64,15 +88,17 @@ export default function Setup({ sessionId, onBack, onReady }: Props) {
       const id = sessionId ?? (await createSession(titleFromJd(jd))).id
       setBusy('Saving job description…')
       await putJd(id, jd.trim())
-      if (source === 'sample_video') {
-        setBusy('Loading the sample interview…')
-        await sourceSample(id)
-      } else if (source === 'paste') {
-        setBusy('Reading your transcript…')
-        await sourcePaste(id, paste)
-      } else if (source === 'upload' && file) {
-        setBusy('Uploading the recording…')
-        await sourceUpload(id, file)
+      if (sourceNeedsIngest(draft, existing)) {
+        if (source === 'sample_video') {
+          setBusy('Loading the sample interview…')
+          await sourceSample(id)
+        } else if (source === 'paste') {
+          setBusy('Reading your transcript…')
+          await sourcePaste(id, paste)
+        } else if (source === 'upload' && file) {
+          setBusy('Uploading the recording…')
+          await sourceUpload(id, file)
+        }
       }
       onReady(id)
     } catch (e) {
@@ -84,7 +110,9 @@ export default function Setup({ sessionId, onBack, onReady }: Props) {
   const jdLen = jd.trim().length
   let hint = 'Ready when you are.'
   if (!jdValid(jd)) hint = `Add at least ${MIN_JD_CHARS - jdLen} more characters to the job description.`
-  else if (!sourceAttached(draft)) hint = 'Choose an interview source to continue.'
+  else if (!hasExistingSource(existing) && !sourceAttached(draft))
+    hint = 'Choose an interview source to continue.'
+  else if (hasExistingSource(existing)) hint = 'Job description saved — continue when ready.'
 
   return (
     <section className="step-in setup">

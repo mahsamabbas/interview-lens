@@ -112,6 +112,36 @@ def get_session(session_id: str) -> dict | None:
     return _row_to_dict(row)
 
 
+ACTIVE_JOB_STATUSES = ("queued", "transcribing", "diarizing", "analyzing")
+
+
+def session_has_active_job(session_id: str) -> bool:
+    placeholders = ",".join("?" for _ in ACTIVE_JOB_STATUSES)
+    with get_connection() as conn:
+        row = conn.execute(
+            f"""
+            SELECT 1 FROM jobs
+            WHERE session_id = ? AND status IN ({placeholders})
+            LIMIT 1
+            """,
+            (session_id, *ACTIVE_JOB_STATUSES),
+        ).fetchone()
+    return row is not None
+
+
+def update_session_status(session_id: str, status: str) -> None:
+    now = _utc_now()
+    with get_connection() as conn:
+        conn.execute(
+            """
+            UPDATE sessions SET status = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            (status, now, session_id),
+        )
+        conn.commit()
+
+
 def update_jd(session_id: str, jd_text: str) -> None:
     now = _utc_now()
     with get_connection() as conn:

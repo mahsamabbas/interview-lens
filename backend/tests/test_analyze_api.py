@@ -56,6 +56,9 @@ def test_analyze_happy(client, monkeypatch):
     reports = client.get(f"/sessions/{sid}/reports").json()
     assert reports["hiring"]["recommendation"] in {"pass", "borderline", "no"}
     assert "assistive" in reports["hiring"]["disclaimer"].lower()
+    session = client.get(f"/sessions/{sid}").json()
+    assert session["status"] == "done"
+    assert session["has_report"] is True
 
 
 def test_run_analyze_job_error(client, monkeypatch):

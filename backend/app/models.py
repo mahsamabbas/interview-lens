@@ -141,6 +141,7 @@ class SessionOut(BaseModel):
     jd_text: str
     source_type: SourceType | None = None
     media_path: str | None = None
+    has_report: bool = False
     segments: list[SegmentOut] = Field(default_factory=list)
 
 

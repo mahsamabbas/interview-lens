@@ -53,6 +53,7 @@ export interface SegmentIn {
 export interface Session extends SessionSummary {
   jd_text: string
   media_path: string | null
+  has_report: boolean
   segments: Segment[]
 }
 

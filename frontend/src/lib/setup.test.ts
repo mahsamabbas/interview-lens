@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { canContinue, jdValid, MIN_JD_CHARS, sourceAttached } from './setup'
+import {
+  canContinue,
+  hasExistingSource,
+  jdValid,
+  MIN_JD_CHARS,
+  sourceAttached,
+  sourceNeedsIngest,
+} from './setup'
 
 const jd = 'x'.repeat(MIN_JD_CHARS)
 
@@ -22,5 +29,19 @@ describe('setup validation', () => {
     expect(canContinue({ jd, source: null, file: null, paste: '' })).toBe(false)
     expect(canContinue({ jd: 'short', source: 'sample_video', file: null, paste: '' })).toBe(false)
     expect(canContinue({ jd, source: 'sample_video', file: null, paste: '' })).toBe(true)
+  })
+
+  it('reopen setup: existing source skips re-ingest', () => {
+    const ex = { sourceType: 'paste' as const, hasMedia: false, hasSegments: true }
+    expect(hasExistingSource(ex)).toBe(true)
+    const draft = { jd, source: 'paste' as const, file: null, paste: '' }
+    expect(sourceNeedsIngest(draft, ex)).toBe(false)
+    expect(canContinue(draft, ex)).toBe(true)
+  })
+
+  it('reopen setup: new paste text triggers ingest', () => {
+    const ex = { sourceType: 'paste' as const, hasMedia: false, hasSegments: true }
+    const draft = { jd, source: 'paste' as const, file: null, paste: 'Candidate: new lines' }
+    expect(sourceNeedsIngest(draft, ex)).toBe(true)
   })
 })

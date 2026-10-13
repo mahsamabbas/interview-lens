@@ -78,6 +78,7 @@ def run_analyze_job(job_id: str) -> None:
             hire.model_dump(),
             config.OLLAMA_CHAT_MODEL,
         )
+        db.update_session_status(job["session_id"], "done")
         db.update_job(job_id, "done")
     except Exception as e:
         db.update_job(job_id, "error", str(e) or e.__class__.__name__)

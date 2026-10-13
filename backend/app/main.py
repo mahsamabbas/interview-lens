@@ -50,6 +50,14 @@ def _require_session(session_id: str) -> dict:
     return session
 
 
+def _reject_if_active_job(session_id: str) -> None:
+    if db.session_has_active_job(session_id):
+        raise HTTPException(
+            status_code=409,
+            detail="A job is already running for this session",
+        )
+
+
 def _whisper_ready() -> bool:
     # Import check only; never load the model from the health endpoint.
     try:
@@ -85,7 +93,11 @@ def create_session(body: CreateSessionIn):
 @app.get("/sessions/{session_id}", response_model=SessionOut)
 def get_session(session_id: str):
     session = _require_session(session_id)
-    return {**session, "segments": db.list_segments(session_id)}
+    return {
+        **session,
+        "has_report": db.latest_report(session_id) is not None,
+        "segments": db.list_segments(session_id),
+    }
 
 
 @app.put("/sessions/{session_id}/jd")
@@ -154,6 +166,7 @@ def transcribe(session_id: str, background: BackgroundTasks):
     media = session.get("media_path")
     has_media = bool(media) and Path(media).exists()
     if has_media:
+        _reject_if_active_job(session_id)
         job_id = jobs.start_transcribe_job(session_id)
         background.add_task(jobs.run_transcribe_job, job_id)
         return {"job_id": job_id}
@@ -185,6 +198,7 @@ def analyze(session_id: str, background: BackgroundTasks):
         raise HTTPException(status_code=400, detail="Job description is required")
     if not db.list_segments(session_id):
         raise HTTPException(status_code=400, detail="Transcript is required")
+    _reject_if_active_job(session_id)
     job_id = jobs.start_analyze_job(session_id)
     background.add_task(jobs.run_analyze_job, job_id)
     return {"job_id": job_id}
