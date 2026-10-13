@@ -6,6 +6,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1
 
+# ffmpeg helps faster-whisper decode mp4/mov/webm (and STT builds need it).
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
 # Core API only. For full STT (faster-whisper/torch/pyannote) build with:
 #   docker compose build --build-arg INSTALL_STT=1 backend
 COPY requirements.txt requirements-stt.txt ./
