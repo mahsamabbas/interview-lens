@@ -1,17 +1,22 @@
 import shutil
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from pathlib import Path
+
+from fastapi import BackgroundTasks, FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
-from app import config, db
+from app import config, db, jobs
 from app.models import (
     CreateSessionIn,
     CreateSessionOut,
     JdIn,
+    JobCreatedOut,
+    JobOut,
     PasteIn,
     SessionOut,
     SessionSummaryOut,
+    TranscriptPatchIn,
 )
 from app.transcript_parse import ParseError, parse_paste_transcript
 from app.validation import ValidationError, validate_jd_text, validate_media_filename
@@ -125,3 +130,33 @@ def source_upload(session_id: str, file: UploadFile = File(...)):
     db.replace_segments(session_id, [])
     db.set_source(session_id, "upload", str(dest))
     return {"ok": True, "media_path": str(dest)}
+
+
+@app.post("/sessions/{session_id}/transcribe", response_model=JobCreatedOut)
+def transcribe(session_id: str, background: BackgroundTasks):
+    session = _require_session(session_id)
+    media = session.get("media_path")
+    has_media = bool(media) and Path(media).exists()
+    if has_media:
+        job_id = jobs.start_transcribe_job(session_id)
+        background.add_task(jobs.run_transcribe_job, job_id)
+        return {"job_id": job_id}
+    if db.list_segments(session_id):
+        return {"job_id": jobs.complete_job_without_stt(session_id)}
+    raise HTTPException(status_code=400, detail="No media or transcript to transcribe")
+
+
+@app.get("/sessions/{session_id}/jobs/{job_id}", response_model=JobOut)
+def get_job(session_id: str, job_id: str):
+    _require_session(session_id)
+    job = db.get_job(job_id)
+    if job is None or job["session_id"] != session_id:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return job
+
+
+@app.patch("/sessions/{session_id}/transcript")
+def patch_transcript(session_id: str, body: TranscriptPatchIn):
+    _require_session(session_id)
+    db.replace_segments(session_id, [s.model_dump() for s in body.segments])
+    return {"ok": True, "segments": len(body.segments)}
