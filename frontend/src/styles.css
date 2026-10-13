@@ -205,6 +205,11 @@ h3,
   border-radius: 999px;
 }
 
+/* keep the status notice a rounded card, not a pill, while it pulses */
+.notice.progress-pulse {
+  border-radius: 10px;
+}
+
 @keyframes report-reveal {
   from {
     opacity: 0;

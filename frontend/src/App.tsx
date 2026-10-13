@@ -32,11 +32,13 @@ export default function App() {
 
   return (
     <main className="app-shell">
-      <header className="chrome">
-        <button type="button" className="brand-link" onClick={goHome} aria-label="InterviewLens home">
-          Interview<span>Lens</span>
-        </button>
-      </header>
+      {inSession && (
+        <header className="chrome">
+          <button type="button" className="brand-link" onClick={goHome} aria-label="InterviewLens home">
+            Interview<span>Lens</span>
+          </button>
+        </header>
+      )}
 
       {inSession && <Stepper current={step as StepKey} onNavigate={setStep} />}
       {openError && (
