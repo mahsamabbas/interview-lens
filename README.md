@@ -82,11 +82,23 @@ docker compose up --build
 - API: <http://localhost:8004>
 - SQLite and uploads persist in `./backend/data` (mounted at `/app/data`).
 
-By default the backend image is **core only** (paste and analyze). It starts without the STT stack, and `whisper_ready` reports `false`. To bake in the STT stack (several GB):
+By default the backend image is **core only** (paste and analyze). It starts without the STT stack, and `whisper_ready` reports `false`. To bake in the STT stack (several GB) **once**:
 
 ```bash
-INSTALL_STT=1 HF_TOKEN=hf_xxx docker compose up --build
+# Put HF_TOKEN=... and INSTALL_STT=1 in root `.env`, then:
+docker compose build backend   # heavy the first time only
+docker compose up              # day-to-day: no rebuild
 ```
+
+**Do not** use `--no-cache` unless you intentionally want a full reinstall. After the first STT image exists:
+
+| Change | Command |
+| --- | --- |
+| Just run again | `docker compose up` (no `--build`) |
+| Only `backend/app` code | `docker compose up --build` — pip layer is **cached**, rebuild is fast |
+| `requirements*.txt` changed | `docker compose build backend` — pip runs again (cache mount still helps) |
+
+Fastest loop for STT work: run the **backend in a local venv** (`pip install -r requirements-stt.txt` once on the Mac) and only use Docker for the frontend, or paste-path demos without STT.
 
 Copy `.env.example` to `.env` to change ports, models or CORS origins. `VITE_API_BASE` is baked into the frontend bundle at build time, so rebuild the frontend if you change it.
 
