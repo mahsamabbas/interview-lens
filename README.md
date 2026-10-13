@@ -1,25 +1,92 @@
 # InterviewLens
 
-InterviewLens is a local interview studio. It turns an interview recording, or a pasted transcript, plus a job description into **two evidence-backed reports**:
+Local interview studio: turn a recording (or pasted transcript) plus a job description into **two evidence-backed reports**.
 
-- **Candidate report:** constructive feedback, strengths and improvements.
-- **Hiring report:** fit, scores and a PASS / borderline / NO decision.
+- **Candidate report** — constructive feedback, strengths, improvements
+- **Hiring report** — fit scores and a `pass` / `borderline` / `no` recommendation
 
-The flow has three steps: **Setup** (job description and source) → **Transcript** (review and edit speakers and text) → **Reports**.
+**Flow:** Setup (JD + source) → Transcript studio (edit speakers / wording) → Reports.
 
-Everything runs on your machine. Speech-to-text uses faster-whisper with pyannote diarization. The LLM is a local Ollama model (`qwen2.5:7b` by default). The browser never calls Ollama.
+Everything runs on your machine. The browser talks only to FastAPI — never to Ollama or Whisper directly.
 
-| Piece | Port |
+## Tech stack
+
+| Layer | Choices |
 | --- | --- |
-| Frontend (React + Vite + Tailwind) | 3004 |
-| API (FastAPI + SQLite) | 8004 |
-| Ollama (on the host) | 11434 |
+| Frontend | React 19, TypeScript, Vite 8 |
+| Styling | Tailwind CSS v4 (`@tailwindcss/vite`) + custom CSS |
+| Backend | Python 3.12, FastAPI, Uvicorn |
+| Validation | Pydantic v2 |
+| Persistence | SQLite (`sqlite3` stdlib) — sessions, segments, jobs, reports |
+| Chat LLM | Local [Ollama](https://ollama.com) — default `qwen2.5:7b` (structured JSON via `/api/chat`) |
+| HTTP client | `httpx` (Ollama + tests) |
+| ASR (Docker / CPU) | [faster-whisper](https://github.com/SYSTRAN/faster-whisper) + CTranslate2 |
+| ASR (Apple Silicon host) | [mlx-whisper](https://github.com/ml-explore/mlx-examples) + Apple Metal (`mlx`) |
+| Diarization | [pyannote.audio](https://github.com/pyannote/pyannote-audio) — `pyannote/speaker-diarization-community-1` |
+| Audio decode | FFmpeg (system or `imageio-ffmpeg`), PyAV (`av`) for faster-whisper |
+| Uploads | `python-multipart` — `.wav` `.mp3` `.m4a` `.webm` `.mp4` `.mov` |
+| Config | `python-dotenv` + `.env` / `.env.example` |
+| Delivery | Docker Compose (backend + nginx frontend) |
+| Tests | Backend: `pytest` + FastAPI `TestClient` / `httpx`. Frontend: Vitest + Testing Library + jsdom |
+
+### Libraries & smaller pieces
+
+**Backend**
+
+- `fastapi` / `uvicorn[standard]` — sessions, JD, paste/upload, transcribe & analyze jobs, reports, health
+- `pydantic` — request/response and report schemas
+- `faster-whisper` + `torch` — CPU STT in Docker / Linux
+- `mlx-whisper` + `mlx` — Metal STT on Mac host (optional `requirements-mlx.txt`)
+- `pyannote.audio` — speaker turns; labels mapped to interviewer / candidate by first appearance
+- `ffmpeg` — normalize media to 16 kHz mono before ASR / diarization
+- `httpx` — Ollama chat; large `num_ctx` so long interviews don’t stall
+- SQLite — async-style background jobs with status polling (`queued` → `transcribing` / `diarizing` / `analyzing` → `done`)
+
+**Frontend**
+
+- `react` / `react-dom` / `vite` / `typescript` — three-step studio UI
+- `tailwindcss` — layout and report chrome
+- Vitest + Testing Library — job copy, setup, transcript helpers
+
+**Requirements split**
+
+| File | Contents |
+| --- | --- |
+| `backend/requirements.txt` | API core (paste + analyze + tests) |
+| `backend/requirements-stt.txt` | faster-whisper, torch, pyannote, av |
+| `backend/requirements-mlx.txt` | mlx-whisper + imageio-ffmpeg (Mac host only) |
+
+**API surface (browser → FastAPI only)**
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/health` | Liveness; `ollama`, `whisper_ready`, `stt_backend`, `hf_token_set` |
+| `POST` | `/sessions` | Create session |
+| `GET` | `/sessions` / `/sessions/{id}` | List / detail + segments |
+| `PUT` | `/sessions/{id}/jd` | Save job description |
+| `POST` | `/sessions/{id}/source/paste` | Parse labeled transcript |
+| `POST` | `/sessions/{id}/source/upload` | Upload media |
+| `POST` | `/sessions/{id}/source/sample` | Load sample JD + transcript |
+| `POST` | `/sessions/{id}/transcribe` | Start STT + diarization job |
+| `PATCH` | `/sessions/{id}/transcript` | Edit segments / speakers |
+| `POST` | `/sessions/{id}/analyze` | Start dual-report LLM job |
+| `GET` | `/sessions/{id}/jobs/{job_id}` | Poll job status |
+| `GET` | `/sessions/{id}/reports` | Candidate + hiring reports |
+
+## Ports
+
+| Service | URL |
+| --- | --- |
+| Frontend | http://localhost:3004 |
+| API | http://localhost:8004 |
+| Ollama (host) | http://localhost:11434 |
 
 ## Prerequisites
 
 - Python 3.12 and Node 22
-- [Ollama](https://ollama.com) running on the host
-- For audio/video transcription only: a free [Hugging Face](https://huggingface.co) account for the pyannote token
+- [Ollama](https://ollama.com) on the host
+- For upload transcription: free [Hugging Face](https://huggingface.co) token (pyannote gated models)
+- Optional on Apple Silicon: Metal MLX stack for faster ASR
 
 ## 1. Ollama
 
@@ -28,86 +95,64 @@ ollama pull qwen2.5:7b
 ollama serve   # if it is not already running
 ```
 
-To use a different model, set `OLLAMA_CHAT_MODEL`.
+Override with `OLLAMA_CHAT_MODEL`.
 
 ## 2. Hugging Face token (speaker diarization)
 
-pyannote needs a Hugging Face token and accepted model terms:
-
 1. Create a read token at <https://huggingface.co/settings/tokens>.
-2. Accept the terms (same HF account as the token) for:
+2. Accept model terms (same account) for:
+   - [`pyannote/speaker-diarization-community-1`](https://huggingface.co/pyannote/speaker-diarization-community-1)
    - [`pyannote/speaker-diarization-3.1`](https://huggingface.co/pyannote/speaker-diarization-3.1)
    - [`pyannote/segmentation-3.0`](https://huggingface.co/pyannote/segmentation-3.0)
-   - [`pyannote/speaker-diarization-community-1`](https://huggingface.co/pyannote/speaker-diarization-community-1) (newer `pyannote.audio` pulls this too)
-3. Put the token in root `.env` for Docker (`HF_TOKEN=...`) and/or `backend/.env` for local uvicorn.
+3. Set `HF_TOKEN=...` in root `.env` (Docker) and/or `backend/.env` (local uvicorn).
 
-Without a token (or if diarization fails), transcription still works. Every segment is labelled `unknown` — click the speaker chip to set **Interviewer** / **Candidate**, then Analyze.
+Without a token (or if diarization fails), ASR still works; segments are `unknown` until you label them in Transcript studio.
 
-**STT tip (accuracy + speed on your M4):**
+### STT backends
 
-| Where you run STT | Backend | Reality |
+| Where | Backend | Notes |
 | --- | --- | --- |
-| **Docker** | `faster-whisper` on CPU | Works, but slow / fuzzier on long `.mov` files. Apple GPU is **not** used inside Docker. |
-| **Mac host (recommended for long interviews)** | `STT_BACKEND=mlx` + [mlx-whisper](https://github.com/ml-explore/mlx-examples) | Uses Metal on M4 — much faster; use `mlx-community/whisper-large-v3-turbo` for a strong speed/quality balance. |
+| **Docker** | `faster-whisper` (CPU) | Works; Apple GPU is **not** available in the Linux container |
+| **Mac host** | `STT_BACKEND=mlx` + `mlx-community/whisper-large-v3-turbo` | Metal — much faster on M-series |
 
-Pipeline improvements (both backends): ffmpeg normalize to **16 kHz mono**, `WHISPER_LANGUAGE=en`, VAD on, beam search.
+Both paths: FFmpeg → 16 kHz mono, `WHISPER_LANGUAGE=en`, VAD / beam where supported.
 
-**Honest limit:** no local ASR is 100% on a 30+ minute interview. For “perfect” wording, edit segments in Transcript studio before Analyze.
+No local ASR is 100% on a long interview — edit wording in Transcript studio before Analyze.
 
-**Measured on this Mac (David / Raydar `.mov`, first 5 minutes, warm cache):** `mlx-community/whisper-large-v3-turbo` ≈ **7 s** → rough **~40–45 s for 30 min ASR alone** (first run slower while the model downloads). Diarization (pyannote) still adds time on top.
-
-**M4 host STT (best for the David / Raydar interview video):**
+**Mac host STT example**
 
 ```bash
-# Terminal A — API on the Mac (not Docker backend)
 cd backend
 source .venv/bin/activate
 pip install -r requirements.txt -r requirements-stt.txt -r requirements-mlx.txt
-# backend/.env:
-#   STT_BACKEND=mlx
-#   WHISPER_MODEL=mlx-community/whisper-large-v3-turbo
-#   WHISPER_LANGUAGE=en
-#   HF_TOKEN=...
+# backend/.env: STT_BACKEND=mlx, WHISPER_MODEL=mlx-community/whisper-large-v3-turbo, HF_TOKEN=...
 uvicorn app.main:app --reload --port 8004
-
-# Terminal B — UI only
-cd frontend && npm run dev -- --port 3004
-# or: docker compose up frontend
 ```
 
-## 3. Run locally (recommended, full STT)
-
-The local virtualenv is the primary way to run InterviewLens with speech-to-text, because the Whisper, torch and pyannote stack is heavy.
+## 3. Run locally (recommended for full STT)
 
 ```bash
-# Backend (API on :8004)
+# Backend (:8004)
 cd backend
 python3.12 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt -r requirements-stt.txt   # drop the STT file for paste-only
-cp .env.example .env                                      # then set HF_TOKEN
+pip install -r requirements.txt -r requirements-stt.txt   # omit STT file for paste-only
+cp .env.example .env                                      # set HF_TOKEN
 uvicorn app.main:app --reload --port 8004
 ```
 
 ```bash
-# Frontend (UI on :3004), in a second terminal
+# Frontend (:3004)
 cd frontend
 cp .env.example .env     # VITE_API_BASE=http://localhost:8004
 npm install
 npm run dev -- --port 3004
 ```
 
-Open <http://localhost:3004>. `GET http://localhost:8004/health` reports `ollama` and `whisper_ready`.
-
-**Requirements split**
-
-| File | Contents |
-| --- | --- |
-| `backend/requirements.txt` | API core: FastAPI, uvicorn, httpx, pytest. Enough for paste, sample and analyze. |
-| `backend/requirements-stt.txt` | faster-whisper, torch, pyannote.audio. Needed for upload transcription. |
+Open <http://localhost:3004>. Check `GET http://localhost:8004/health`.
 
 ## 4. Run with Docker
 
-Ollama stays on the host. The backend container reaches it at `http://host.docker.internal:11434`.
+Ollama stays on the host (`http://host.docker.internal:11434` from the container).
 
 ```bash
 docker compose up --build
@@ -115,68 +160,41 @@ docker compose up --build
 
 - UI: <http://localhost:3004>
 - API: <http://localhost:8004>
-- SQLite and uploads persist in `./backend/data` (mounted at `/app/data`).
+- Data: `./backend/data` → `/app/data`
 
-By default the backend image is **core only** (paste and analyze). It starts without the STT stack, and `whisper_ready` reports `false`. To bake in the STT stack (several GB) **once**:
+Default image is **core only** (paste + analyze). Bake STT once:
 
 ```bash
-# Put HF_TOKEN=... and INSTALL_STT=1 in root `.env`, then:
-docker compose build backend   # heavy the first time only
-docker compose up              # day-to-day: no rebuild
+# root .env: HF_TOKEN=... and INSTALL_STT=1
+docker compose build backend
+docker compose up
 ```
 
-**Do not** use `--no-cache` unless you intentionally want a full reinstall. After the first STT image exists:
-
-| Change | Command |
-| --- | --- |
-| Just run again | `docker compose up` (no `--build`) |
-| Only `backend/app` code | `docker compose up --build` — pip layer is **cached**, rebuild is fast |
-| `requirements*.txt` changed | `docker compose build backend` — pip runs again (cache mount still helps) |
-
-Fastest loop for STT work: run the **backend in a local venv** (`pip install -r requirements-stt.txt` once on the Mac) and only use Docker for the frontend, or paste-path demos without STT.
-
-Copy `.env.example` to `.env` to change ports, models or CORS origins. `VITE_API_BASE` is baked into the frontend bundle at build time, so rebuild the frontend if you change it.
+Avoid `--no-cache` unless you need a full pip reinstall. `VITE_API_BASE` is baked at frontend build time.
 
 ## 5. Sample data
 
-`backend/data/` ships with:
+In `backend/data/`:
 
-- `sample_jd.md` and `sample_transcript.md`. The **Sample** source loads these. It works without any audio and without STT.
-- `sample_interview.wav`. A tiny 3-second placeholder tone that wires up the sample media path. It contains no speech. If the file is missing, the sample flow still works from the transcript alone.
+- `sample_jd.md` / `sample_transcript.md` — **Sample** source (no audio / STT required)
+- `sample_interview.wav` — short placeholder tone (no real speech)
 
-To regenerate the placeholder with the standard library:
-
-```bash
-python3 - <<'EOF'
-import wave, struct, math
-sr = 16000
-with wave.open("backend/data/sample_interview.wav", "wb") as w:
-    w.setnchannels(1); w.setsampwidth(2); w.setframerate(sr)
-    w.writeframes(b"".join(
-        struct.pack("<h", int((0.2 if (i / sr) % 1.0 < 0.4 else 0.0) * 32767 * math.sin(2 * math.pi * 440 * i / sr)))
-        for i in range(sr * 3)))
-EOF
-```
-
-To use real speech, record or convert a clip with `ffmpeg -i input.mp4 -ac 1 -ar 16000 backend/data/sample_interview.wav`.
+Real speech: `ffmpeg -i input.mp4 -ac 1 -ar 16000 backend/data/sample_interview.wav`.
 
 ## 6. Tests
 
 ```bash
-# Backend (STT and Ollama are mocked, core requirements are enough)
 cd backend && source .venv/bin/activate && PYTHONPATH=. pytest -v
-
-# Frontend
 cd frontend && npx vitest run
 ```
 
 ## Limitations
 
-- **Local only.** There are no cloud STT or LLM calls, no auth, no multi-user support, no PDF export, and no Zoom or Meet integration.
-- **Diarization is heuristic.** The first speaker is mapped to interviewer and the second to candidate. Review and correct labels before analyzing.
-- **Heavy STT stack.** Whisper, torch and pyannote need several GB and are slow on CPU. The Docker image omits them by default.
-- **Model quality varies.** The reports come from a 7B local model. Output is validated against a schema and quotes are checked against the transcript, but treat results as decision support, not a hiring verdict. This is not legal or HR compliance advice.
-- **Sample wav has no speech.** Use the sample transcript for the demo.
+- **Local only** — no cloud STT/LLM, auth, multi-user, PDF export, or Zoom/Meet sync
+- **Diarization is heuristic** — first distinct speaker → interviewer, second → candidate; always review labels
+- **Heavy STT stack** — Whisper / torch / pyannote need several GB; Docker omits them unless `INSTALL_STT=1`
+- **7B model quality varies** — schema + quote checks help, but treat reports as assistive only (not legal/HR advice)
+- **Long transcripts are truncated** for the LLM prompt so analyze stays practical on local hardware
 
 ## Docs
 
