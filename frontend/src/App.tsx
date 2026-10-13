@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import Home from './components/Home'
+import Reports from './components/Reports'
 import Setup from './components/Setup'
 import Stepper from './components/Stepper'
 import TranscriptStudio from './components/TranscriptStudio'
@@ -73,27 +74,13 @@ export default function App() {
         />
       )}
       {step === 'reports' && (
-        <Placeholder
-          title="Reports"
-          text="Candidate feedback and the hiring decision will appear here."
-          onNext={goHome}
-          nextLabel="Back to home"
+        <Reports
+          key={sessionId ?? 'none'}
+          sessionId={sessionId}
+          onBackToTranscript={() => setStep('transcript')}
+          onHome={goHome}
         />
       )}
     </main>
-  )
-}
-
-function Placeholder(props: { title: string; text: string; onNext: () => void; nextLabel: string }) {
-  return (
-    <section className="step-in">
-      <h2>{props.title}</h2>
-      <div className="panel empty">
-        <p>{props.text}</p>
-        <button type="button" className="btn" onClick={props.onNext}>
-          {props.nextLabel}
-        </button>
-      </div>
-    </section>
   )
 }

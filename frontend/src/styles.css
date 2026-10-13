@@ -434,3 +434,238 @@ textarea.field {
   color: var(--muted);
   font-size: 0.82rem;
 }
+
+/* ── Task 11: dual reports ─────────────────────────────── */
+.reports-top {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1.25rem;
+}
+.reports-top h2 {
+  margin: 0;
+  font-size: 1.5rem;
+}
+.report-actions {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+.tabs {
+  display: inline-flex;
+  gap: 0.25rem;
+  padding: 0.25rem;
+  margin-bottom: 1.25rem;
+  background: var(--ink-2);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+.tab {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: 700 0.9rem var(--font-body);
+  padding: 0.55rem 1rem;
+  border-radius: 9px;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.tab:hover {
+  color: var(--text);
+}
+.tab.is-active {
+  background: var(--mint);
+  color: var(--ink);
+}
+.tab:focus-visible,
+.btn:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: 2px;
+}
+.report-stack {
+  display: grid;
+  gap: 1.1rem;
+}
+.report-stack h3 {
+  margin: 0 0 0.75rem;
+  font-size: 1.05rem;
+}
+.report-text {
+  margin: 0;
+  line-height: 1.6;
+}
+
+.verdict {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 1.5rem;
+  align-items: center;
+  border-width: 2px;
+}
+.verdict-kicker {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.verdict-badge {
+  margin: 0.15rem 0;
+  font: 800 clamp(2.6rem, 8vw, 4.2rem) var(--font-display);
+  line-height: 1.05;
+}
+.verdict-conf {
+  margin: 0;
+  color: var(--muted);
+  font-weight: 600;
+}
+.verdict.tone-pass {
+  border-color: var(--mint);
+  background: linear-gradient(135deg, rgba(62, 224, 183, 0.16), var(--ink-2));
+}
+.verdict.tone-pass .verdict-badge {
+  color: var(--mint);
+}
+.verdict.tone-borderline {
+  border-color: var(--amber);
+  background: linear-gradient(135deg, rgba(245, 185, 66, 0.16), var(--ink-2));
+}
+.verdict.tone-borderline .verdict-badge {
+  color: var(--amber);
+}
+.verdict.tone-no {
+  border-color: var(--text);
+  background: linear-gradient(135deg, rgba(232, 238, 248, 0.08), var(--ink));
+}
+.verdict.tone-no .verdict-badge {
+  color: var(--text);
+}
+@media (max-width: 640px) {
+  .verdict {
+    grid-template-columns: 1fr;
+  }
+  .reports-top {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+
+.score-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 1rem 1.25rem;
+}
+.score-row.is-overall {
+  grid-column: 1 / -1;
+}
+.score-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 0.35rem;
+}
+.score-label {
+  font-weight: 700;
+}
+.score-value {
+  font: 700 1.4rem var(--font-display);
+}
+.score-value small {
+  color: var(--muted);
+  font-size: 0.7rem;
+  margin-left: 0.15rem;
+}
+.score-bar {
+  height: 8px;
+  border-radius: 8px;
+  background: var(--ink-3);
+  overflow: hidden;
+}
+.score-bar span {
+  display: block;
+  height: 100%;
+  border-radius: 8px;
+  background: var(--mint);
+}
+.score-row.tone-mid .score-bar span {
+  background: var(--amber);
+}
+.score-row.tone-low .score-bar span {
+  background: var(--muted);
+}
+.score-why {
+  margin: 0.4rem 0 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+  line-height: 1.45;
+}
+
+.evidence-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 0.75rem;
+}
+.evidence-card {
+  background: rgba(139, 154, 181, 0.1);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--mint);
+  border-radius: 12px;
+  padding: 0.9rem 1rem;
+}
+.evidence-card.is-warn {
+  border-left-color: var(--amber);
+}
+.evidence-card h4 {
+  margin: 0 0 0.4rem;
+  font: 700 0.98rem var(--font-body);
+}
+.evidence-body p {
+  margin: 0 0 0.5rem;
+  color: var(--text);
+  line-height: 1.5;
+  font-size: 0.9rem;
+}
+.tip strong {
+  color: var(--amber);
+}
+.evidence-quote {
+  margin: 0.4rem 0 0;
+  padding: 0.6rem 0.75rem;
+  background: rgba(11, 18, 32, 0.6);
+  border-radius: 8px;
+  color: var(--muted);
+  font-style: italic;
+  font-size: 0.88rem;
+  line-height: 1.5;
+}
+.quote-label {
+  display: block;
+  margin-bottom: 0.2rem;
+  color: var(--mint);
+  font-style: normal;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.plain-list {
+  margin: 0;
+  padding-left: 1.2rem;
+  display: grid;
+  gap: 0.35rem;
+  line-height: 1.5;
+}
+.disclaimer {
+  margin: 0;
+  padding: 0.8rem 1rem;
+  border: 1px dashed var(--amber);
+  border-radius: 10px;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
