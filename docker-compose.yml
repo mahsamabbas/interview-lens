@@ -1,0 +1,35 @@
+# InterviewLens runs Ollama on the host, not in Compose.
+# Default backend image is core-only (paste + analyze). For STT:
+#   INSTALL_STT=1 docker compose build backend
+services:
+  backend:
+    build:
+      context: ./backend
+      args:
+        INSTALL_STT: ${INSTALL_STT:-0}
+    ports:
+      - "${BACKEND_PORT:-8004}:8000"
+    environment:
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      OLLAMA_CHAT_MODEL: ${OLLAMA_CHAT_MODEL:-qwen2.5:7b}
+      HF_TOKEN: ${HF_TOKEN:-}
+      WHISPER_MODEL: ${WHISPER_MODEL:-base}
+      SQLITE_PATH: /app/data/interviewlens.db
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3004,http://127.0.0.1:3004}
+    volumes:
+      - ./backend/data:/app/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        # Baked into the browser bundle; it cannot reach Docker service DNS.
+        VITE_API_BASE: ${VITE_API_BASE:-http://localhost:8004}
+    ports:
+      - "${FRONTEND_PORT:-3004}:80"
+    depends_on:
+      - backend
+    restart: unless-stopped

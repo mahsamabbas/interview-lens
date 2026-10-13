@@ -1,0 +1,5 @@
+# Optional heavy STT stack: install on top of requirements.txt for upload/sample transcription.
+# pip install -r requirements.txt -r requirements-stt.txt
+faster-whisper>=1.0.0
+torch>=2.0.0
+pyannote.audio>=3.1.0
