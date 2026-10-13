@@ -1,5 +1,6 @@
 import json
 import re
+from typing import Any
 
 import httpx
 
@@ -34,18 +35,37 @@ def _parse_json(text: str) -> dict:
     return data
 
 
-def chat_json(prompt: str) -> dict:
+def chat_json(
+    prompt: str,
+    *,
+    format_schema: dict[str, Any] | None = None,
+    temperature: float = 0.1,
+    num_predict: int = 8192,
+) -> dict:
     """Send prompt to Ollama and return parsed JSON object. Raises on failure."""
+    body: dict[str, Any] = {
+        "model": config.OLLAMA_CHAT_MODEL,
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "You output only valid JSON matching the requested schema. "
+                    "Never omit required keys. Never wrap JSON in markdown."
+                ),
+            },
+            {"role": "user", "content": prompt},
+        ],
+        "stream": False,
+        "format": format_schema if format_schema is not None else "json",
+        "options": {
+            "temperature": temperature,
+            "num_predict": num_predict,
+        },
+    }
     r = httpx.post(
         f"{config.OLLAMA_BASE_URL}/api/chat",
-        json={
-            "model": config.OLLAMA_CHAT_MODEL,
-            "messages": [{"role": "user", "content": prompt}],
-            "stream": False,
-            "format": "json",
-            "options": {"temperature": 0.2},
-        },
-        timeout=300.0,
+        json=body,
+        timeout=600.0,
     )
     r.raise_for_status()
     content = r.json()["message"]["content"]

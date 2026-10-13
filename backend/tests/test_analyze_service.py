@@ -59,7 +59,9 @@ SEGS = [
 def test_analyze_happy(monkeypatch):
     from app import analyze_service
 
-    monkeypatch.setattr(analyze_service, "chat_json", lambda prompt: _valid_payload())
+    monkeypatch.setattr(
+        analyze_service, "chat_json", lambda prompt, **kwargs: _valid_payload()
+    )
     cand, hire = analyze_interview(JD, SEGS)
     assert isinstance(cand, CandidateReport)
     assert isinstance(hire, HiringReport)
@@ -93,7 +95,9 @@ def test_strips_invented_evidence(monkeypatch):
     )
     payload["hiring"]["recommendation"] = "pass"
     payload["hiring"]["hire_confidence"] = 85
-    monkeypatch.setattr(analyze_service, "chat_json", lambda prompt: payload)
+    monkeypatch.setattr(
+        analyze_service, "chat_json", lambda prompt, **kwargs: payload
+    )
     segs = [{"speaker": "candidate", "text": "I use FastAPI daily"}]
     cand, hire = analyze_interview("Need Kubernetes and Python." + (" y" * 20), segs)
     assert hire.skill_evidence == []
@@ -116,7 +120,7 @@ def test_retries_once_on_invalid_then_succeeds(monkeypatch):
 
     calls = []
 
-    def fake(prompt):
+    def fake(prompt, **kwargs):
         calls.append(prompt)
         return {"candidate": {}, "hiring": {}} if len(calls) == 1 else _valid_payload()
 
@@ -131,7 +135,7 @@ def test_raises_after_second_invalid(monkeypatch):
 
     calls = []
 
-    def fake(prompt):
+    def fake(prompt, **kwargs):
         calls.append(prompt)
         return {"bad": True}
 
@@ -146,13 +150,13 @@ def test_prompt_contains_guardrails(monkeypatch):
 
     seen = []
 
-    def fake(prompt):
+    def fake(prompt, **kwargs):
         seen.append(prompt)
         return copy.deepcopy(_valid_payload())
 
     monkeypatch.setattr(analyze_service, "chat_json", fake)
     analyze_interview(JD, SEGS)
     p = seen[0].lower()
-    assert "only" in p and "transcript" in p
+    assert "hiring" in p and "transcript" in p
     assert "never invent" in p
     assert "candidate: i use fastapi daily" in p

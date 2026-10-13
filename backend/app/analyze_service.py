@@ -1,14 +1,43 @@
 import json
+from typing import Any
 
-from pydantic import ValidationError
+from pydantic import BaseModel, Field, ValidationError
 
 from app import config
-from app.models import CandidateReport, GapItem, HiringReport
+from app.models import (
+    CandidateReport,
+    GapItem,
+    HiringReport,
+    Recommendation,
+    ScoreBlock,
+)
 from app.ollama_client import chat_json
+
+# Keep prompts inside a size 7B models can finish as valid JSON.
+_MAX_TRANSCRIPT_CHARS = 12_000
 
 
 class AnalyzeError(Exception):
     pass
+
+
+class _LLMHiring(BaseModel):
+    """Hiring fields the model must produce (disclaimer is forced server-side)."""
+
+    scores: ScoreBlock
+    recommendation: Recommendation
+    hire_confidence: int = Field(ge=0, le=100)
+    fit_summary: str
+    skill_evidence: list[dict[str, Any]] = Field(default_factory=list)
+    gaps: list[dict[str, Any]] = Field(default_factory=list)
+    red_flags: list[dict[str, Any]] = Field(default_factory=list)
+    follow_up_questions: list[str] = Field(default_factory=list)
+    unknowns: list[str] = Field(default_factory=list)
+
+
+class _LLMDual(BaseModel):
+    candidate: CandidateReport
+    hiring: _LLMHiring
 
 
 def evidence_allowed(quote: str, transcript_blob: str) -> bool:
@@ -29,55 +58,230 @@ def _transcript_text(segments: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def _build_prompt(jd: str, transcript: str) -> str:
-    schema = {
-        "candidate": {
-            "scores": {
-                k: {"score": "int 0-100", "rationale": "str"}
-                for k in ("jd_match", "answer_depth", "communication", "structure", "overall")
-            },
-            "summary": "str",
-            "strengths": [{"point": "str", "evidence_quote": "verbatim from transcript"}],
-            "improvements": [
-                {"point": "str", "evidence_quote": "verbatim from transcript", "tip": "str"}
-            ],
-            "question_notes": [
-                {
-                    "topic_or_question": "str",
-                    "note": "str",
-                    "evidence_quote": "verbatim from transcript",
-                }
-            ],
-            "readiness_note": "str",
-            "unknowns": ["str"],
-        },
-        "hiring": {
-            "scores": "same shape as candidate.scores",
-            "recommendation": "pass | borderline | no",
-            "hire_confidence": "int 0-100",
-            "fit_summary": "str",
-            "skill_evidence": [{"skill": "str", "evidence_quote": "verbatim from transcript"}],
-            "gaps": [{"skill_or_requirement": "str", "note": "str"}],
-            "red_flags": [{"note": "str", "evidence_quote": "verbatim from transcript"}],
-            "follow_up_questions": ["str"],
-            "unknowns": ["str"],
-            "disclaimer": "str",
+def _truncate_transcript(transcript: str) -> str:
+    if len(transcript) <= _MAX_TRANSCRIPT_CHARS:
+        return transcript
+    half = _MAX_TRANSCRIPT_CHARS // 2
+    return (
+        transcript[:half]
+        + "\n\n[... middle of transcript omitted for length ...]\n\n"
+        + transcript[-half:]
+    )
+
+
+def _score_schema() -> dict:
+    return {
+        "type": "object",
+        "required": ["score", "rationale"],
+        "properties": {
+            "score": {"type": "integer"},
+            "rationale": {"type": "string"},
         },
     }
+
+
+def _dual_format_schema() -> dict:
+    """Ollama structured-output schema (hiring.disclaimer omitted — set by server)."""
+    score_block = {
+        "type": "object",
+        "required": [
+            "jd_match",
+            "answer_depth",
+            "communication",
+            "structure",
+            "overall",
+        ],
+        "properties": {
+            k: _score_schema()
+            for k in (
+                "jd_match",
+                "answer_depth",
+                "communication",
+                "structure",
+                "overall",
+            )
+        },
+    }
+    return {
+        "type": "object",
+        "required": ["candidate", "hiring"],
+        "properties": {
+            "candidate": {
+                "type": "object",
+                "required": [
+                    "scores",
+                    "summary",
+                    "strengths",
+                    "improvements",
+                    "question_notes",
+                    "readiness_note",
+                    "unknowns",
+                ],
+                "properties": {
+                    "scores": score_block,
+                    "summary": {"type": "string"},
+                    "strengths": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "required": ["point", "evidence_quote"],
+                            "properties": {
+                                "point": {"type": "string"},
+                                "evidence_quote": {"type": "string"},
+                            },
+                        },
+                    },
+                    "improvements": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "required": ["point", "evidence_quote", "tip"],
+                            "properties": {
+                                "point": {"type": "string"},
+                                "evidence_quote": {"type": "string"},
+                                "tip": {"type": "string"},
+                            },
+                        },
+                    },
+                    "question_notes": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "required": ["topic_or_question", "note", "evidence_quote"],
+                            "properties": {
+                                "topic_or_question": {"type": "string"},
+                                "note": {"type": "string"},
+                                "evidence_quote": {"type": "string"},
+                            },
+                        },
+                    },
+                    "readiness_note": {"type": "string"},
+                    "unknowns": {"type": "array", "items": {"type": "string"}},
+                },
+            },
+            "hiring": {
+                "type": "object",
+                "required": [
+                    "scores",
+                    "recommendation",
+                    "hire_confidence",
+                    "fit_summary",
+                    "skill_evidence",
+                    "gaps",
+                    "red_flags",
+                    "follow_up_questions",
+                    "unknowns",
+                ],
+                "properties": {
+                    "scores": score_block,
+                    "recommendation": {
+                        "type": "string",
+                        "enum": ["pass", "borderline", "no"],
+                    },
+                    "hire_confidence": {"type": "integer"},
+                    "fit_summary": {"type": "string"},
+                    "skill_evidence": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "required": ["skill", "evidence_quote"],
+                            "properties": {
+                                "skill": {"type": "string"},
+                                "evidence_quote": {"type": "string"},
+                            },
+                        },
+                    },
+                    "gaps": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "required": ["skill_or_requirement", "note"],
+                            "properties": {
+                                "skill_or_requirement": {"type": "string"},
+                                "note": {"type": "string"},
+                            },
+                        },
+                    },
+                    "red_flags": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "required": ["note", "evidence_quote"],
+                            "properties": {
+                                "note": {"type": "string"},
+                                "evidence_quote": {"type": "string"},
+                            },
+                        },
+                    },
+                    "follow_up_questions": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                    },
+                    "unknowns": {"type": "array", "items": {"type": "string"}},
+                },
+            },
+        },
+    }
+
+
+def _build_prompt(jd: str, transcript: str) -> str:
     return (
-        "You are an interview analyst. Compare the interview transcript to the job description "
-        "and produce two reports as ONE JSON object with keys \"candidate\" and \"hiring\".\n\n"
-        "Rules:\n"
-        "- Every evidence_quote MUST be copied verbatim from the transcript. Use quotes only "
-        "from the transcript; do not paraphrase or invent quotes.\n"
-        "- If a required skill has no evidence in the transcript, list it under gaps or "
-        "unknowns. Never invent evidence. Never invent a PASS: recommend \"pass\" only when "
-        "the transcript clearly supports it.\n"
-        "- Be honest and concise. Output JSON only, no commentary.\n\n"
-        f"JSON shape:\n{json.dumps(schema, indent=2)}\n\n"
+        "Analyze this interview. Return ONE JSON object with exactly two keys: "
+        '"candidate" and "hiring".\n\n'
+        "hiring MUST include ALL of these keys (use [] for empty lists): "
+        "scores, recommendation (pass|borderline|no), hire_confidence (0-100), "
+        "fit_summary, skill_evidence, gaps, red_flags, follow_up_questions, unknowns.\n"
+        "Do NOT put a disclaimer field in hiring.\n"
+        "candidate MUST include: scores, summary, strengths, improvements, "
+        "question_notes, readiness_note, unknowns.\n"
+        "scores needs jd_match, answer_depth, communication, structure, overall — "
+        "each {score:int, rationale:str}.\n"
+        "evidence_quote values must be short verbatim snippets from the transcript "
+        "(or empty string if none). Never invent skills or a pass without evidence.\n\n"
         f"=== JOB DESCRIPTION ===\n{jd.strip()}\n\n"
         f"=== TRANSCRIPT ===\n{transcript}\n"
     )
+
+
+def _build_repair_prompt(jd: str, transcript: str, bad: dict, err: str) -> str:
+    return (
+        "Your previous JSON was invalid for our schema.\n"
+        f"Validation error:\n{err}\n\n"
+        "Previous JSON:\n"
+        f"{json.dumps(bad)[:4000]}\n\n"
+        "Return a COMPLETE corrected JSON object with both candidate and hiring. "
+        "hiring must include recommendation, hire_confidence, fit_summary, scores, "
+        "skill_evidence, gaps, red_flags, follow_up_questions, unknowns "
+        "(use [] where empty). No disclaimer field.\n\n"
+        f"=== JOB DESCRIPTION ===\n{jd.strip()}\n\n"
+        f"=== TRANSCRIPT ===\n{transcript}\n"
+    )
+
+
+def _normalize_payload(data: dict) -> dict:
+    """Pull candidate/hiring out of common LLM wrapping mistakes."""
+    if not isinstance(data, dict):
+        raise ValueError("payload is not an object")
+    if "candidate" in data and "hiring" in data:
+        return data
+    # Sometimes models nest under "reports" / "result"
+    for key in ("reports", "result", "data", "output"):
+        inner = data.get(key)
+        if isinstance(inner, dict) and "candidate" in inner and "hiring" in inner:
+            return inner
+    raise ValueError("JSON missing top-level candidate and hiring keys")
+
+
+def _parse_reports(data: dict) -> tuple[CandidateReport, HiringReport]:
+    data = _normalize_payload(data)
+    dual = _LLMDual.model_validate(data)
+    hire = HiringReport.model_validate(
+        {
+            **dual.hiring.model_dump(),
+            "disclaimer": config.HIRING_DISCLAIMER,
+        }
+    )
+    return dual.candidate, hire
 
 
 def _filter_evidence(
@@ -117,20 +321,29 @@ def analyze_interview(jd: str, segments: list[dict]) -> tuple[CandidateReport, H
     transcript = _transcript_text(segments or [])
     if not transcript:
         raise AnalyzeError("Cannot analyze: transcript is empty.")
+    transcript = _truncate_transcript(transcript)
 
+    schema = _dual_format_schema()
     prompt = _build_prompt(jd, transcript)
     last_err: Exception | None = None
-    for _ in range(2):
+    last_data: dict | None = None
+
+    for attempt in range(2):
         try:
-            data = chat_json(prompt)
-            cand = CandidateReport.model_validate(data["candidate"])
-            hire = HiringReport.model_validate(
-                {"disclaimer": config.HIRING_DISCLAIMER, **data["hiring"]}
-            )
+            if attempt == 0:
+                data = chat_json(prompt, format_schema=schema)
+            else:
+                data = chat_json(
+                    _build_repair_prompt(jd, transcript, last_data or {}, str(last_err)),
+                    format_schema=schema,
+                )
+            last_data = data
+            cand, hire = _parse_reports(data)
         except (ValidationError, KeyError, TypeError, ValueError) as e:
             last_err = e
             continue
         except Exception as e:  # LLM/transport failure
             raise AnalyzeError(f"LLM call failed: {e}") from e
         return _filter_evidence(cand, hire, transcript)
+
     raise AnalyzeError(f"LLM returned invalid report JSON after retry: {last_err}")

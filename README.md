@@ -43,7 +43,7 @@ pyannote needs a Hugging Face token and accepted model terms:
 
 Without a token (or if diarization fails), transcription still works. Every segment is labelled `unknown` — click the speaker chip to set **Interviewer** / **Candidate**, then Analyze.
 
-**Speed tip:** Docker STT runs on CPU. A ~20 minute `.mov` can take a long time. For demos use a **2–5 minute** clip, or set `WHISPER_MODEL=tiny` in root `.env` (faster, slightly less accurate than `base`).
+**STT tip:** Docker Whisper runs on CPU. A ~20 minute `.mov` is slow. Prefer a **2–5 minute** clip for demos. `WHISPER_MODEL=base` (default quality) is clearer English than `tiny`; use `tiny` only when you need speed over accuracy.
 
 ## 3. Run locally (recommended, full STT)
 
