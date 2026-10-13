@@ -7,7 +7,7 @@ export function jobStatusMessage(status: string): string {
     case 'diarizing':
       return 'Separating speakers…'
     case 'analyzing':
-      return 'Writing both reports…'
+      return 'Writing both reports with local Ollama (often 1–3 min on a long interview)…'
     case 'ready':
       return 'Transcript ready — review speakers, then analyze.'
     case 'done':

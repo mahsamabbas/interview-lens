@@ -8,3 +8,6 @@ dist/
 backend/data/*.db
 backend/data/uploads/
 .superpowers/
+
+# local STT benchmarks
+backend/data/bench_*

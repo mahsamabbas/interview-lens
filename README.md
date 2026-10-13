@@ -43,7 +43,37 @@ pyannote needs a Hugging Face token and accepted model terms:
 
 Without a token (or if diarization fails), transcription still works. Every segment is labelled `unknown` — click the speaker chip to set **Interviewer** / **Candidate**, then Analyze.
 
-**STT tip:** Docker Whisper runs on CPU — it will never be perfect (accents, crosstalk, compression). For best results: short clear clip, `WHISPER_MODEL=small` or `medium` in root `.env`, then **edit wording in Transcript studio** before Analyze. That edit step is how you get demo-ready accuracy. `tiny`/`base` are faster but fuzzier.
+**STT tip (accuracy + speed on your M4):**
+
+| Where you run STT | Backend | Reality |
+| --- | --- | --- |
+| **Docker** | `faster-whisper` on CPU | Works, but slow / fuzzier on long `.mov` files. Apple GPU is **not** used inside Docker. |
+| **Mac host (recommended for long interviews)** | `STT_BACKEND=mlx` + [mlx-whisper](https://github.com/ml-explore/mlx-examples) | Uses Metal on M4 — much faster; use `mlx-community/whisper-large-v3-turbo` for a strong speed/quality balance. |
+
+Pipeline improvements (both backends): ffmpeg normalize to **16 kHz mono**, `WHISPER_LANGUAGE=en`, VAD on, beam search.
+
+**Honest limit:** no local ASR is 100% on a 30+ minute interview. For “perfect” wording, edit segments in Transcript studio before Analyze.
+
+**Measured on this Mac (David / Raydar `.mov`, first 5 minutes, warm cache):** `mlx-community/whisper-large-v3-turbo` ≈ **7 s** → rough **~40–45 s for 30 min ASR alone** (first run slower while the model downloads). Diarization (pyannote) still adds time on top.
+
+**M4 host STT (best for the David / Raydar interview video):**
+
+```bash
+# Terminal A — API on the Mac (not Docker backend)
+cd backend
+source .venv/bin/activate
+pip install -r requirements.txt -r requirements-stt.txt -r requirements-mlx.txt
+# backend/.env:
+#   STT_BACKEND=mlx
+#   WHISPER_MODEL=mlx-community/whisper-large-v3-turbo
+#   WHISPER_LANGUAGE=en
+#   HF_TOKEN=...
+uvicorn app.main:app --reload --port 8004
+
+# Terminal B — UI only
+cd frontend && npm run dev -- --port 3004
+# or: docker compose up frontend
+```
 
 ## 3. Run locally (recommended, full STT)
 

@@ -60,8 +60,10 @@ def _reject_if_active_job(session_id: str) -> None:
 
 def _whisper_ready() -> bool:
     # Import check only; never load the model from the health endpoint.
+    backend = config.STT_BACKEND
+    pkg = "mlx_whisper" if backend in {"mlx", "mlx-whisper"} else "faster_whisper"
     try:
-        return importlib.util.find_spec("faster_whisper") is not None
+        return importlib.util.find_spec(pkg) is not None
     except (ImportError, ValueError):
         return False
 
@@ -73,6 +75,8 @@ def health():
         "status": "ok",
         "ollama": ollama_ok(),
         "whisper_ready": _whisper_ready(),
+        "stt_backend": config.STT_BACKEND,
+        "whisper_model": config.WHISPER_MODEL,
         "hf_token_set": bool(config.HF_TOKEN),
     }
 

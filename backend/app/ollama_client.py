@@ -40,9 +40,15 @@ def chat_json(
     *,
     format_schema: dict[str, Any] | None = None,
     temperature: float = 0.1,
-    num_predict: int = 8192,
+    num_predict: int = 3072,
+    num_ctx: int = 16384,
 ) -> dict:
-    """Send prompt to Ollama and return parsed JSON object. Raises on failure."""
+    """Send prompt to Ollama and return parsed JSON object. Raises on failure.
+
+    Default num_ctx is well above the runner's tiny 4k load — otherwise a long
+    JD+transcript prompt fills the window and context-shift makes analyze take
+    many minutes (or never finish).
+    """
     body: dict[str, Any] = {
         "model": config.OLLAMA_CHAT_MODEL,
         "messages": [
@@ -50,7 +56,8 @@ def chat_json(
                 "role": "system",
                 "content": (
                     "You output only valid JSON matching the requested schema. "
-                    "Never omit required keys. Never wrap JSON in markdown."
+                    "Never omit required keys. Never wrap JSON in markdown. "
+                    "Keep rationales and lists concise."
                 ),
             },
             {"role": "user", "content": prompt},
@@ -60,6 +67,7 @@ def chat_json(
         "options": {
             "temperature": temperature,
             "num_predict": num_predict,
+            "num_ctx": num_ctx,
         },
     }
     r = httpx.post(

@@ -1,15 +1,18 @@
 """Speech-to-text + diarization.
 
-Heavy deps (faster-whisper, torch, pyannote) are imported lazily inside
-functions so importing this module (and running pytest with STT mocked)
-never requires them.
+Heavy deps (faster-whisper, mlx-whisper, torch, pyannote) are imported lazily
+so pytest can mock STT without installing them.
 """
 
 from __future__ import annotations
 
 import logging
+import os
+import subprocess
+import tempfile
 from collections.abc import Callable
 from pathlib import Path
+from shutil import which
 
 from app import config
 from app.models import Speaker
@@ -40,22 +43,100 @@ def map_speakers(raw_labels: list[str | None]) -> list[Speaker]:
     return out
 
 
-def _get_whisper():
+def _ffmpeg_bin() -> str:
+    """Prefer system ffmpeg; fall back to imageio-ffmpeg's bundled binary."""
+    found = which("ffmpeg")
+    if found:
+        return found
+    try:
+        import imageio_ffmpeg
+
+        return imageio_ffmpeg.get_ffmpeg_exe()
+    except Exception:
+        return "ffmpeg"
+
+
+def _ensure_ffmpeg_on_path() -> None:
+    """mlx-whisper shells out to `ffmpeg` by name; put bundled bin on PATH if needed."""
+    if which("ffmpeg"):
+        return
+    try:
+        import imageio_ffmpeg
+
+        exe = Path(imageio_ffmpeg.get_ffmpeg_exe())
+        bindir = str(exe.parent)
+        os.environ["PATH"] = bindir + os.pathsep + os.environ.get("PATH", "")
+        # Some wheels ship a non-`ffmpeg` filename; symlink if missing.
+        link = exe.parent / "ffmpeg"
+        if not link.exists() and exe.exists():
+            try:
+                link.symlink_to(exe)
+            except OSError:
+                pass
+    except Exception as exc:
+        logger.warning("could not put bundled ffmpeg on PATH: %s", exc)
+
+
+def _prepare_wav(path: Path) -> tuple[Path, bool]:
+    """ffmpeg → 16 kHz mono wav for cleaner ASR/diarization.
+
+    Returns (wav_path, is_temp). If ffmpeg fails, returns the original path.
+    """
+    path = Path(path)
+    tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+    tmp.close()
+    out = Path(tmp.name)
+    cmd = [
+        _ffmpeg_bin(),
+        "-y",
+        "-i",
+        str(path),
+        "-ac",
+        "1",
+        "-ar",
+        "16000",
+        "-vn",
+        str(out),
+    ]
+    try:
+        subprocess.run(
+            cmd,
+            check=True,
+            capture_output=True,
+            timeout=600,
+        )
+        return out, True
+    except Exception as exc:
+        logger.warning("ffmpeg normalize failed (%s); using original media", exc)
+        try:
+            out.unlink(missing_ok=True)
+        except OSError:
+            pass
+        return path, False
+
+
+def _get_faster_whisper():
     global _whisper_model
     if _whisper_model is None:
         try:
             from faster_whisper import WhisperModel
-        except ImportError as e:  # pragma: no cover - depends on env
+        except ImportError as e:  # pragma: no cover
             raise RuntimeError(
-                "faster-whisper is not installed; install it to transcribe media"
+                "faster-whisper is not installed; install requirements-stt.txt"
             ) from e
         _whisper_model = WhisperModel(config.WHISPER_MODEL, compute_type="int8")
     return _whisper_model
 
 
-def _run_whisper(path: Path) -> list[dict]:
-    model = _get_whisper()
-    segments, _info = model.transcribe(str(path))
+def _run_faster_whisper(path: Path) -> list[dict]:
+    model = _get_faster_whisper()
+    segments, _info = model.transcribe(
+        str(path),
+        language=config.WHISPER_LANGUAGE or None,
+        beam_size=max(1, config.WHISPER_BEAM_SIZE),
+        vad_filter=config.WHISPER_VAD,
+        condition_on_previous_text=False,
+    )
     out = []
     for seg in segments:
         text = (seg.text or "").strip()
@@ -70,9 +151,48 @@ def _run_whisper(path: Path) -> list[dict]:
     return out
 
 
+def _run_mlx_whisper(path: Path) -> list[dict]:
+    """Apple Silicon Metal path — host only (not useful inside Docker Linux)."""
+    try:
+        import mlx_whisper
+    except ImportError as e:  # pragma: no cover
+        raise RuntimeError(
+            "mlx-whisper is not installed. On Mac: pip install -r requirements-mlx.txt "
+            "and set STT_BACKEND=mlx"
+        ) from e
+
+    _ensure_ffmpeg_on_path()
+    result = mlx_whisper.transcribe(
+        str(path),
+        path_or_hf_repo=config.WHISPER_MODEL,
+        language=config.WHISPER_LANGUAGE or None,
+        word_timestamps=False,
+        condition_on_previous_text=False,
+    )
+    out = []
+    for seg in result.get("segments") or []:
+        text = (seg.get("text") or "").strip()
+        if not text:
+            continue
+        out.append(
+            {
+                "start_ms": int(float(seg.get("start", 0)) * 1000),
+                "end_ms": int(float(seg.get("end", 0)) * 1000),
+                "text": text,
+            }
+        )
+    return out
+
+
+def _run_whisper(path: Path) -> list[dict]:
+    backend = config.STT_BACKEND
+    if backend in {"mlx", "mlx-whisper"}:
+        return _run_mlx_whisper(path)
+    return _run_faster_whisper(path)
+
+
 def _extract_diarization_turns(diarization) -> list[tuple[float, float, str]]:
     """Normalize pyannote 3.x Annotation and 4.x DiarizeOutput to turns."""
-    # community-1 / pyannote.audio 4.x
     exclusive = getattr(diarization, "exclusive_speaker_diarization", None)
     speaker_diarization = exclusive or getattr(diarization, "speaker_diarization", None)
     if speaker_diarization is not None:
@@ -83,7 +203,6 @@ def _extract_diarization_turns(diarization) -> list[tuple[float, float, str]]:
         if turns:
             return turns
 
-    # legacy Annotation API (speaker-diarization-3.1)
     if hasattr(diarization, "itertracks"):
         return [
             (float(turn.start), float(turn.end), str(label))
@@ -113,7 +232,6 @@ def _get_diarize_pipeline(hf_token: str):
 def _run_diarize(path: Path, hf_token: str) -> list[tuple[float, float, str]]:
     """Return (start_s, end_s, label) turns. Raises on any failure."""
     pipeline = _get_diarize_pipeline(hf_token)
-    # Interviews are almost always two speakers — helps clustering.
     try:
         diarization = pipeline(str(path), num_speakers=2)
     except TypeError:
@@ -147,35 +265,41 @@ def transcribe_media(
 
     Whisper failure raises. Diarization is best-effort: without an HF token or
     if pyannote fails, every segment gets speaker "unknown".
-    `on_phase` (optional) is called with "transcribing" then "diarizing" (only
-    when diarization will actually run).
     """
     path = Path(path)
     if on_phase:
         on_phase("transcribing")
-    segments = _run_whisper(path)
-    labels: list[str | None] = [None] * len(segments)
-    if hf_token and segments:
-        if on_phase:
-            on_phase("diarizing")
-        try:
-            labels = _align(segments, _run_diarize(path, hf_token))
-        except Exception as exc:
-            # Best-effort: keep transcript text; UI can relabel speakers.
-            logger.warning(
-                "Diarization failed (%s); labeling speakers as unknown",
-                exc,
-                exc_info=True,
-            )
-            labels = [None] * len(segments)
-    speakers = map_speakers(labels)
-    return [
-        {
-            "idx": i,
-            "start_ms": seg["start_ms"],
-            "end_ms": seg["end_ms"],
-            "speaker": speakers[i],
-            "text": seg["text"],
-        }
-        for i, seg in enumerate(segments)
-    ]
+
+    audio_path, is_temp = _prepare_wav(path)
+    try:
+        segments = _run_whisper(audio_path)
+        labels: list[str | None] = [None] * len(segments)
+        if hf_token and segments:
+            if on_phase:
+                on_phase("diarizing")
+            try:
+                labels = _align(segments, _run_diarize(audio_path, hf_token))
+            except Exception as exc:
+                logger.warning(
+                    "Diarization failed (%s); labeling speakers as unknown",
+                    exc,
+                    exc_info=True,
+                )
+                labels = [None] * len(segments)
+        speakers = map_speakers(labels)
+        return [
+            {
+                "idx": i,
+                "start_ms": seg["start_ms"],
+                "end_ms": seg["end_ms"],
+                "speaker": speakers[i],
+                "text": seg["text"],
+            }
+            for i, seg in enumerate(segments)
+        ]
+    finally:
+        if is_temp:
+            try:
+                audio_path.unlink(missing_ok=True)
+            except OSError:
+                pass

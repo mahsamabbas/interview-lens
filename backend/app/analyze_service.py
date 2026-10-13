@@ -13,8 +13,9 @@ from app.models import (
 )
 from app.ollama_client import chat_json
 
-# Keep prompts inside a size 7B models can finish as valid JSON.
-_MAX_TRANSCRIPT_CHARS = 12_000
+# Keep prompts inside a size 7B models can finish as valid JSON quickly.
+_MAX_TRANSCRIPT_CHARS = 8_000
+_MAX_JD_CHARS = 2_500
 
 
 class AnalyzeError(Exception):
@@ -67,6 +68,13 @@ def _truncate_transcript(transcript: str) -> str:
         + "\n\n[... middle of transcript omitted for length ...]\n\n"
         + transcript[-half:]
     )
+
+
+def _truncate_jd(jd: str) -> str:
+    jd = (jd or "").strip()
+    if len(jd) <= _MAX_JD_CHARS:
+        return jd
+    return jd[:_MAX_JD_CHARS] + "\n\n[... JD truncated for length ...]"
 
 
 def _score_schema() -> dict:
@@ -238,7 +246,7 @@ def _build_prompt(jd: str, transcript: str) -> str:
         "each {score:int, rationale:str}.\n"
         "evidence_quote values must be short verbatim snippets from the transcript "
         "(or empty string if none). Never invent skills or a pass without evidence.\n\n"
-        f"=== JOB DESCRIPTION ===\n{jd.strip()}\n\n"
+        f"=== JOB DESCRIPTION ===\n{_truncate_jd(jd)}\n\n"
         f"=== TRANSCRIPT ===\n{transcript}\n"
     )
 
@@ -248,12 +256,12 @@ def _build_repair_prompt(jd: str, transcript: str, bad: dict, err: str) -> str:
         "Your previous JSON was invalid for our schema.\n"
         f"Validation error:\n{err}\n\n"
         "Previous JSON:\n"
-        f"{json.dumps(bad)[:4000]}\n\n"
+        f"{json.dumps(bad)[:2500]}\n\n"
         "Return a COMPLETE corrected JSON object with both candidate and hiring. "
         "hiring must include recommendation, hire_confidence, fit_summary, scores, "
         "skill_evidence, gaps, red_flags, follow_up_questions, unknowns "
-        "(use [] where empty). No disclaimer field.\n\n"
-        f"=== JOB DESCRIPTION ===\n{jd.strip()}\n\n"
+        "(use [] where empty). No disclaimer field. Keep text concise.\n\n"
+        f"=== JOB DESCRIPTION ===\n{_truncate_jd(jd)}\n\n"
         f"=== TRANSCRIPT ===\n{transcript}\n"
     )
 

@@ -13,7 +13,11 @@ services:
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       OLLAMA_CHAT_MODEL: ${OLLAMA_CHAT_MODEL:-qwen2.5:7b}
       HF_TOKEN: ${HF_TOKEN:-}
+      STT_BACKEND: ${STT_BACKEND:-faster-whisper}
       WHISPER_MODEL: ${WHISPER_MODEL:-base}
+      WHISPER_LANGUAGE: ${WHISPER_LANGUAGE:-en}
+      WHISPER_BEAM_SIZE: ${WHISPER_BEAM_SIZE:-5}
+      WHISPER_VAD: ${WHISPER_VAD:-true}
       DIARIZATION_MODEL: ${DIARIZATION_MODEL:-pyannote/speaker-diarization-community-1}
       SQLITE_PATH: /app/data/interviewlens.db
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3004,http://127.0.0.1:3004}
